@@ -1,8 +1,10 @@
-//use mime_guess::MimeGuess;
+use base64::{engine::general_purpose, Engine as _};
+
+use mime_guess::MimeGuess;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
-//use std::path::Path;
+use std::path::Path;
 use std::thread;
 
 const MAX_BODY_LENGTH: usize = 1024;
@@ -258,7 +260,7 @@ fn handle_get_file_request(file_path: &str) -> HttpResponse {
             };
         }
 
-        let content_type = "application/octet-stream".to_string(); //get_content_type(file_path);
+        let content_type = get_content_type(file_path);
 
         HttpResponse {
             status: "HTTP/1.1 200 OK",
@@ -326,8 +328,8 @@ fn send_response(mut stream: &TcpStream, response: &HttpResponse) {
             eprintln!("Error writing response body: {}", err);
         }
         // Append the body to the full response string (only MAX_BODY_LENGTH chars at max)
-        let body_str = String::from_utf8_lossy(body);
-        full_response += &body_str[..std::cmp::min(body_str.len(), MAX_BODY_LENGTH)];
+        let body_slice = &body[..std::cmp::min(body.len(), MAX_BODY_LENGTH)];
+        full_response += general_purpose::STANDARD.encode(&body_slice); // Encode binary data to base64
     }
 
     println!("Sent response:\n{}", full_response);
@@ -352,4 +354,16 @@ fn save_file(file_path: &str, contents: &str) -> io::Result<()> {
     let mut file = File::create(file_path)?;
     file.write_all(contents.as_bytes())?;
     Ok(())
+}
+
+fn get_content_type(file_path: &str) -> String {
+    let extension = Path::new(file_path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default();
+
+    // Use mime_guess to guess the MIME type based on the file extension
+    let mime = MimeGuess::from_ext(extension).first_or_octet_stream();
+    // Return the MIME type as str
+    mime.to_string()
 }
