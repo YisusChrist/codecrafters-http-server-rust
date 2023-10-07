@@ -63,7 +63,7 @@ Note: This section is for stages 2 and beyond.
 
 # Functionalities implemented for each stage
 
-Here are the functionalities that you'll need to implement for each stage. If you get stuck, each stage has a corresponding branch with the solution for that stage. For example, if you get stuck on stage 3, you can view the solution for stage 3 [here]
+Here are the functionalities that you'll need to implement for each stage:
 
 ## Stage 1: Bind to a port
 
@@ -217,5 +217,3 @@ You'll need to fetch the contents of the file from the request body and save it 
 # Extra functionalities added
 
 - Added mime types autodection for files.
-- 
-
