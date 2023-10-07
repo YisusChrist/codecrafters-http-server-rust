@@ -68,7 +68,31 @@ fn process_request(mut stream: &TcpStream, request_str: &str, headers: &[String]
 
     println!("Extracted path: {:?}", path);
 
-    if path == "/" {
+    if request_str.starts_with("POST") {
+        if let Some(filename) = extract_filename(&path) {
+            let file_path = format!("{}/{}", directory, filename);
+
+            // Read the request body
+            let body_start = request_str.find("\r\n\r\n").unwrap_or(0) + 4;
+            let request_body = &request_str[body_start..];
+
+            if let Err(err) = save_file(&file_path, request_body) {
+                eprintln!("Error saving file: {}", err);
+                // Respond with a 500 Internal Server Error if saving the file fails
+                let response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
+                send_response(stream, response);
+                return;
+            }
+
+            // Respond with a "201 Created" response code
+            let response = "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n";
+            send_response(stream, response);
+        } else {
+            // Respond with a 400 Bad Request for invalid paths
+            let response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
+            send_response(stream, response);
+        }
+    } else if path == "/" {
         // Respond with a 200 OK for the root path
         let response = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
         send_response(stream, response);
@@ -156,6 +180,12 @@ fn extract_filename(path: &str) -> Option<&str> {
     }
 }
 
+fn save_file(file_path: &str, contents: &str) -> Result<(), std::io::Error> {
+    let mut file = File::create(file_path)?;
+    file.write_all(contents.as_bytes())?;
+    Ok(())
+}
+
 fn extract_random_string(path: &str) -> Option<String> {
     let parts: Vec<&str> = path.split('/').collect();
     if parts.len() >= 2 && parts[1] == "echo" {
@@ -174,7 +204,7 @@ fn main() {
         // Default directory when --directory is not provided
         "/path/to/default/directory"
     };
-    
+
     println!("Logs from your program will appear here!");
 
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
