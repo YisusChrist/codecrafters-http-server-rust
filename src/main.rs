@@ -353,15 +353,3 @@ fn save_file(file_path: &str, contents: &str) -> io::Result<()> {
     file.write_all(contents.as_bytes())?;
     Ok(())
 }
-
-fn get_content_type(file_path: &str) -> String {
-    let extension = Path::new(file_path)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or_default();
-
-    // Use mime_guess to guess the MIME type based on the file extension
-    let mime = MimeGuess::from_ext(extension).first_or_octet_stream();
-    // Return the MIME type as str
-    mime.to_string()
-}
