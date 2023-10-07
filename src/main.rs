@@ -205,7 +205,7 @@ fn process_request(
                     status: "HTTP/1.1 200 OK",
                     content_type: Some("text/plain".to_string()),
                     content_length: Some(user_agent_value.len()),
-                    body: None,
+                    body: Some(user_agent_value.as_bytes().to_vec()),
                 }
             } else {
                 HttpResponse {
