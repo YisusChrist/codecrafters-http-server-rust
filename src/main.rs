@@ -3,6 +3,7 @@ use std::net::{TcpListener, TcpStream};
 use std::thread;
 
 fn handle_client(stream: TcpStream) {
+    // Test the handling of multiple concurrent connections
     let request = read_request(&stream);
 
     match request {
