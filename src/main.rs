@@ -49,9 +49,15 @@ fn handle_client(stream: TcpStream, directory: &str) {
     let request = read_request(&stream);
 
     match request {
-        Ok((request_str, headers, body)) => {
-            println!("Received HTTP request:\n{}", request_str);
-            process_request(&stream, &request_str, &headers, &body, directory);
+        Ok(request) => {
+            println!("Received request:\n{}", request.request_str);
+            process_request(
+                &stream,
+                &request.request_str,
+                &request.headers,
+                &request.body,
+                directory,
+            );
         }
         Err(err) => {
             eprintln!("Error reading request: {}", err);
