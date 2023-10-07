@@ -1,6 +1,8 @@
+use mime_guess::MimeGuess;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::Path;
 use std::thread;
 
 struct HttpRequest {
@@ -11,9 +13,9 @@ struct HttpRequest {
 
 struct HttpResponse {
     status: &'static str,
-    content_type: Option<&'static str>,
+    content_type: Option<String>,
     content_length: Option<usize>,
-    body: Option<String>,
+    body: Option<Vec<u8>>,
 }
 
 fn main() -> io::Result<()> {
@@ -181,9 +183,9 @@ fn process_request(
             let random_string = path.trim_start_matches("/echo/");
             HttpResponse {
                 status: "HTTP/1.1 200 OK",
-                content_type: Some("text/plain"),
+                content_type: Some("text/plain".to_string()),
                 content_length: Some(random_string.len()),
-                body: Some(random_string.to_string()),
+                body: None,
             }
         }
         Some("/user-agent") => {
@@ -194,9 +196,9 @@ fn process_request(
                 let user_agent_value = user_agent.replace("User-Agent: ", "");
                 HttpResponse {
                     status: "HTTP/1.1 200 OK",
-                    content_type: Some("text/plain"),
+                    content_type: Some("text/plain".to_string()),
                     content_length: Some(user_agent_value.len()),
-                    body: Some(user_agent_value),
+                    body: None,
                 }
             } else {
                 HttpResponse {
@@ -249,14 +251,13 @@ fn handle_get_file_request(file_path: &str) -> HttpResponse {
             };
         }
 
-        let content_type = "application/octet-stream";
-        let content_length = file_contents.len();
-        let body = String::from_utf8_lossy(&file_contents).into_owned();
+        let content_type = get_content_type(file_path);
+
         HttpResponse {
             status: "HTTP/1.1 200 OK",
             content_type: Some(content_type),
-            content_length: Some(content_length),
-            body: Some(body),
+            content_length: Some(file_contents.len()),
+            body: Some(file_contents),
         }
     } else {
         HttpResponse {
@@ -282,35 +283,41 @@ fn handle_post_file_request(file_path: &str, body: &str) -> HttpResponse {
     } else {
         println!("File saved successfully");
 
-        let body = body.to_string();
         HttpResponse {
             status: "HTTP/1.1 201 Created",
             content_type: None,
             content_length: Some(0),
-            body: Some(body),
+            body: None,
         }
     }
 }
 
 fn send_response(mut stream: &TcpStream, response: &HttpResponse) {
-    let mut response_str = response.status.to_string();
-    if let Some(content_type) = response.content_type {
+    let status_line = response.status;
+    let mut response_str = status_line.to_string();
+
+    if let Some(content_type) = &response.content_type {
         response_str += &format!("\r\nContent-Type: {}", content_type);
     }
-    if let Some(content_length) = response.content_length {
+
+    if let Some(content_length) = &response.content_length {
         response_str += &format!("\r\nContent-Length: {}", content_length);
     }
-    response_str += "\r\n\r\n";
 
-    if let Some(body) = &response.body {
-        response_str += body;
-    }
+    response_str += "\r\n\r\n";
 
     if let Err(err) = stream.write_all(response_str.as_bytes()) {
         eprintln!("Error writing response: {}", err);
-    } else {
-        println!("Sent response:\n{}", response_str);
     }
+
+    if let Some(body) = &response.body {
+        // Write the binary body data to the stream
+        if let Err(err) = stream.write_all(body) {
+            eprintln!("Error writing response body: {}", err);
+        }
+    }
+
+    println!("Sent response:\n{}", response_str);
 }
 
 fn extract_path(request: &str) -> Option<&str> {
@@ -332,4 +339,16 @@ fn save_file(file_path: &str, contents: &str) -> io::Result<()> {
     let mut file = File::create(file_path)?;
     file.write_all(contents.as_bytes())?;
     Ok(())
+}
+
+fn get_content_type(file_path: &str) -> String {
+    let extension = Path::new(file_path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default();
+
+    // Use mime_guess to guess the MIME type based on the file extension
+    let mime = MimeGuess::from_ext(extension).first_or_octet_stream();
+    // Return the MIME type as str
+    mime.to_string()
 }
