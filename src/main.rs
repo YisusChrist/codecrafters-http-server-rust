@@ -108,6 +108,10 @@ fn process_request(mut stream: &TcpStream, request_str: &str, headers: &[String]
             let body_start = request_str.find("\r\n\r\n").unwrap_or(0) + 4;
             let request_body = &request_str[body_start..];
 
+            println!("Received file contents:\n{}", request_body);
+
+            // Save the file
+            println!("Saving file {} to: {}", filename, file_path);
             if let Err(err) = save_file(&file_path, request_body) {
                 eprintln!("Error saving file: {}", err);
                 // Respond with a 500 Internal Server Error if saving the file fails
