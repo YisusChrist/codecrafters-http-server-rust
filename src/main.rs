@@ -1,15 +1,16 @@
+use std::fs::File;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 
-fn handle_client(stream: TcpStream) {
+fn handle_client(stream: TcpStream, directory: &str) {
     // Test the handling of multiple concurrent connections
     let request = read_request(&stream);
 
     match request {
         Ok((request_str, headers)) => {
             println!("Received HTTP request:\n{}", request_str);
-            process_request(&stream, &request_str, &headers);
+            process_request(&stream, &request_str, &headers, directory);
         }
         Err(err) => {
             eprintln!("Error reading request: {}", err);
@@ -56,7 +57,7 @@ fn read_request(mut stream: &TcpStream) -> Result<(String, Vec<String>), std::io
     }
 }
 
-fn process_request(stream: &TcpStream, request_str: &str, headers: &[String]) {
+fn process_request(mut stream: &TcpStream, request_str: &str, headers: &[String], directory: &str) {
     let path = match extract_path(&request_str) {
         Some(p) => p,
         None => {
@@ -97,6 +98,35 @@ fn process_request(stream: &TcpStream, request_str: &str, headers: &[String]) {
             send_response(stream, &response);
             return;
         }
+    } else if let Some(filename) = extract_filename(&path) {
+        let file_path = format!("{}/{}", directory, filename);
+
+        if let Ok(mut file) = File::open(&file_path) {
+            let mut file_contents = Vec::new();
+            if let Err(err) = file.read_to_end(&mut file_contents) {
+                eprintln!("Error reading file: {}", err);
+                // Respond with a 500 Internal Server Error if reading the file fails
+                let response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
+                send_response(stream, response);
+                return;
+            }
+
+            let content_type = "application/octet-stream";
+            let content_length = file_contents.len();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n",
+                content_type, content_length
+            );
+
+            send_response(stream, &response);
+            if let Err(err) = stream.write_all(&file_contents) {
+                eprintln!("Error writing file contents: {}", err);
+            }
+        } else {
+            // Respond with a 404 Not Found if the file doesn't exist
+            let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+            send_response(stream, response);
+        }
     } else {
         let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
         send_response(stream, response);
@@ -117,6 +147,15 @@ fn extract_path(request: &str) -> Option<&str> {
     Some(&request[start..end])
 }
 
+fn extract_filename(path: &str) -> Option<&str> {
+    let parts: Vec<&str> = path.split('/').collect();
+    if parts.len() == 3 && parts[1] == "files" {
+        Some(parts[2])
+    } else {
+        None
+    }
+}
+
 fn extract_random_string(path: &str) -> Option<String> {
     let parts: Vec<&str> = path.split('/').collect();
     if parts.len() >= 2 && parts[1] == "echo" {
@@ -127,6 +166,14 @@ fn extract_random_string(path: &str) -> Option<String> {
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() != 3 || args[1] != "--directory" {
+        eprintln!("Usage: {} --directory <directory>", args[0]);
+        return;
+    }
+
+    let directory = &args[2];
     println!("Logs from your program will appear here!");
 
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
@@ -136,8 +183,9 @@ fn main() {
             Ok(tcp_stream) => {
                 println!("Accepted new connection");
 
+                let directory = directory.to_string();
                 thread::spawn(move || {
-                    handle_client(tcp_stream);
+                    handle_client(tcp_stream, &directory);
                 });
             }
             Err(e) => {
