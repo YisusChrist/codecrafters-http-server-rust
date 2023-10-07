@@ -69,6 +69,7 @@ fn process_request(mut stream: &TcpStream, request_str: &str, headers: &[String]
     println!("Extracted path: {:?}", path);
 
     if request_str.starts_with("POST") {
+        println!("Received POST request");
         if let Some(filename) = extract_filename(&path) {
             let file_path = format!("{}/{}", directory, filename);
 
