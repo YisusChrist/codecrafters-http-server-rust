@@ -3,13 +3,12 @@ use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 
-/*
 struct HttpRequest {
     request_str: String,
     headers: Vec<String>,
     body: String,
 }
-*/
+
 struct HttpResponse {
     status: &'static str,
     content_type: Option<&'static str>,
@@ -64,7 +63,7 @@ fn handle_client(stream: TcpStream, directory: &str) {
     }
 }
 
-fn read_request(mut stream: &TcpStream) -> io::Result<(String, Vec<String>, String)> {
+fn read_request(mut stream: &TcpStream) -> io::Result<HttpRequest> {
     let mut request = String::new();
     let mut headers = Vec::new();
     let mut buffer = [0; 1024];
@@ -85,12 +84,7 @@ fn read_request(mut stream: &TcpStream) -> io::Result<(String, Vec<String>, Stri
 
                 if let Some(length_str) = headers.iter().find(|s| s.starts_with("Content-Length: "))
                 {
-                    let parts: Vec<&str> = length_str.splitn(2, ' ').collect();
-                    if parts.len() == 2 {
-                        if let Ok(length) = parts[1].parse::<usize>() {
-                            content_length = length;
-                        }
-                    }
+                    content_length = parse_content_length(length_str);
                 }
             }
         }
@@ -101,15 +95,30 @@ fn read_request(mut stream: &TcpStream) -> io::Result<(String, Vec<String>, Stri
     }
 
     if header_complete {
+        let request_str = request.trim_end_matches("\r\n\r\n").to_string();
         let body_start = request.find("\r\n\r\n").unwrap_or(0) + 4;
         let body = request.split_off(body_start);
-        Ok((request, headers, body))
+        Ok(HttpRequest {
+            request_str,
+            headers,
+            body,
+        })
     } else {
         Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "Incomplete header",
         ))
     }
+}
+
+fn parse_content_length(header: &str) -> usize {
+    let parts: Vec<&str> = header.splitn(2, ' ').collect();
+    if parts.len() == 2 {
+        if let Ok(length) = parts[1].parse::<usize>() {
+            return length;
+        }
+    }
+    0 // Default value if parsing fails
 }
 
 fn process_request(
@@ -119,7 +128,7 @@ fn process_request(
     body: &str,
     directory: &str,
 ) {
-    let response: HttpResponse = match extract_path(request_str) {
+    let response = match extract_path(request_str) {
         Some("/") => HttpResponse {
             status: "HTTP/1.1 200 OK",
             content_type: None,
