@@ -168,12 +168,13 @@ fn extract_random_string(path: &str) -> Option<String> {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
-    if args.len() != 3 || args[1] != "--directory" {
-        eprintln!("Usage: {} --directory <directory>", args[0]);
-        return;
-    }
-
-    let directory = &args[2];
+    let directory = if args.len() >= 3 && args[1] == "--directory" {
+        &args[2]
+    } else {
+        // Default directory when --directory is not provided
+        "/path/to/default/directory"
+    };
+    
     println!("Logs from your program will appear here!");
 
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
