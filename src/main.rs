@@ -49,7 +49,11 @@ fn process_request(stream: &TcpStream, request_str: &str) {
 
     println!("Extracted path: {:?}", path);
 
-    if let Some(random_string) = extract_random_string(&path) {
+    if path == "/" {
+        // Respond with a 200 OK for the root path
+        let response = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+        send_response(stream, response);
+    } else if let Some(random_string) = extract_random_string(&path) {
         println!("Extracted random string: {:?}", random_string);
 
         let response = format!(
