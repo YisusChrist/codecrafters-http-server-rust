@@ -156,6 +156,7 @@ fn process_request(
         }
         Some(path) => {
             if let Some(filename) = extract_filename(path) {
+                println!("Received filename: {}", filename);
                 let file_path = format!("{}/{}", directory, filename);
                 let response = if request_str.starts_with("POST") {
                     handle_post_request(&file_path, body)
@@ -198,11 +199,14 @@ fn handle_get_request(file_path: &str) -> HttpResponse {
             };
         }
 
+        let content_type = "application/octet-stream";
+        let content_length = file_contents.len();
+        let body = String::from_utf8_lossy(&file_contents).into_owned();
         HttpResponse {
             status: "HTTP/1.1 200 OK",
-            content_type: Some("application/octet-stream"),
-            content_length: Some(file_contents.len()),
-            body: None,
+            content_type: Some(content_type),
+            content_length: Some(content_length),
+            body: Some(body),
         }
     } else {
         HttpResponse {
@@ -227,11 +231,13 @@ fn handle_post_request(file_path: &str, body: &str) -> HttpResponse {
         }
     } else {
         println!("File saved successfully");
+
+        let body = body.to_string();
         HttpResponse {
             status: "HTTP/1.1 201 Created",
             content_type: None,
             content_length: Some(0),
-            body: None,
+            body: Some(body),
         }
     }
 }
