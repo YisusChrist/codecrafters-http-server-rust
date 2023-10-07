@@ -1,10 +1,38 @@
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 
+fn main() -> io::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    let directory = if args.len() >= 3 && args[1] == "--directory" {
+        &args[2]
+    } else {
+        // Default directory when --directory is not provided
+        "/path/to/default/directory"
+    };
+
+    println!("Logs from your program will appear here!");
+
+    let listener = TcpListener::bind("127.0.0.1:4221")?;
+    for stream in listener.incoming() {
+        match stream {
+            Ok(tcp_stream) => {
+                println!("Accepted new connection");
+                let directory = directory.to_string();
+                thread::spawn(move || {
+                    handle_client(tcp_stream, &directory);
+                });
+            }
+            Err(e) => {
+                eprintln!("Error accepting connection: {}", e);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn handle_client(stream: TcpStream, directory: &str) {
-    // Test the handling of multiple concurrent connections
     let request = read_request(&stream);
 
     match request {
@@ -22,7 +50,7 @@ fn handle_client(stream: TcpStream, directory: &str) {
     }
 }
 
-fn read_request(mut stream: &TcpStream) -> Result<(String, Vec<String>, String), std::io::Error> {
+fn read_request(mut stream: &TcpStream) -> io::Result<(String, Vec<String>, String)> {
     let mut request = String::new();
     let mut headers = Vec::new();
     let mut buffer = [0; 1024];
@@ -38,10 +66,9 @@ fn read_request(mut stream: &TcpStream) -> Result<(String, Vec<String>, String),
         if !header_complete {
             if let Some(end) = request.find("\r\n\r\n") {
                 let header_section = &request[..=end];
-                headers = header_section.lines().map(|s| s.to_string()).collect();
+                headers = header_section.lines().map(String::from).collect();
                 header_complete = true;
 
-                // Check for Content-Length header
                 if let Some(length_str) = headers.iter().find(|s| s.starts_with("Content-Length: "))
                 {
                     let parts: Vec<&str> = length_str.splitn(2, ' ').collect();
@@ -60,13 +87,12 @@ fn read_request(mut stream: &TcpStream) -> Result<(String, Vec<String>, String),
     }
 
     if header_complete {
-        // Extract the request body if present
         let body_start = request.find("\r\n\r\n").unwrap_or(0) + 4;
         let body = request.split_off(body_start);
         Ok((request, headers, body))
     } else {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
             "Incomplete header",
         ))
     }
@@ -90,7 +116,6 @@ fn process_request(
     println!("Extracted path: {:?}", path);
 
     if path == "/" {
-        // Respond with a 200 OK for the root path
         let response = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
         send_response(stream, response);
     } else if let Some(random_string) = extract_random_string(&path) {
@@ -103,11 +128,10 @@ fn process_request(
         );
         send_response(stream, &response);
     } else if path == "/user-agent" {
-        // Find the User-Agent header value
-        let user_agent = headers
+        if let Some(user_agent) = headers
             .iter()
-            .find(|header| header.starts_with("User-Agent: "));
-        if let Some(user_agent) = user_agent {
+            .find(|header| header.starts_with("User-Agent: "))
+        {
             let user_agent_value = user_agent.replace("User-Agent: ", "");
             println!("User-Agent: {:?}", user_agent_value);
 
@@ -131,15 +155,12 @@ fn process_request(
 
             println!("Received file contents:\n{}", body);
 
-            // Save the file
             println!("Saved file to: {}", file_path);
             if let Err(err) = save_file(&file_path, body) {
                 eprintln!("Error saving file: {}", err);
-                // Respond with a 500 Internal Server Error if saving the file fails
                 response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
             } else {
                 println!("File saved successfully");
-                // Respond with a "201 Created" response code
                 response = "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n";
             }
             send_response(stream, &response);
@@ -148,7 +169,6 @@ fn process_request(
                 let mut file_contents = Vec::new();
                 if let Err(err) = file.read_to_end(&mut file_contents) {
                     eprintln!("Error reading file: {}", err);
-                    // Respond with a 500 Internal Server Error if reading the file fails
                     let response =
                         "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
                     send_response(stream, response);
@@ -167,7 +187,6 @@ fn process_request(
                     eprintln!("Error writing file contents: {}", err);
                 }
             } else {
-                // Respond with a 404 Not Found if the file doesn't exist
                 let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
                 send_response(stream, response);
             }
@@ -201,7 +220,7 @@ fn extract_filename(path: &str) -> Option<&str> {
     }
 }
 
-fn save_file(file_path: &str, contents: &str) -> Result<(), std::io::Error> {
+fn save_file(file_path: &str, contents: &str) -> io::Result<()> {
     let mut file = File::create(file_path)?;
     file.write_all(contents.as_bytes())?;
     Ok(())
@@ -213,36 +232,5 @@ fn extract_random_string(path: &str) -> Option<String> {
         Some(parts[2..].join("/").to_string())
     } else {
         None
-    }
-}
-
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-
-    let directory = if args.len() >= 3 && args[1] == "--directory" {
-        &args[2]
-    } else {
-        // Default directory when --directory is not provided
-        "/path/to/default/directory"
-    };
-
-    println!("Logs from your program will appear here!");
-
-    let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
-
-    for stream in listener.incoming() {
-        match stream {
-            Ok(tcp_stream) => {
-                println!("Accepted new connection");
-
-                let directory = directory.to_string();
-                thread::spawn(move || {
-                    handle_client(tcp_stream, &directory);
-                });
-            }
-            Err(e) => {
-                eprintln!("Error accepting connection: {}", e);
-            }
-        }
     }
 }
