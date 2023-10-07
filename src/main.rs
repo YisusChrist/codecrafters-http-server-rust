@@ -85,7 +85,7 @@ fn extract_path(request: &str) -> Option<&str> {
 fn extract_random_string(path: &str) -> Option<String> {
     let parts: Vec<&str> = path.split('/').collect();
     if parts.len() >= 2 && parts[1] == "echo" {
-        Some(parts[1..].join("/").to_string())
+        Some(parts[2..].join("/").to_string())
     } else {
         None
     }
