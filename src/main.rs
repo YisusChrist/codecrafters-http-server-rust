@@ -68,32 +68,7 @@ fn process_request(mut stream: &TcpStream, request_str: &str, headers: &[String]
 
     println!("Extracted path: {:?}", path);
 
-    if request_str.starts_with("POST") {
-        println!("Received POST request");
-        if let Some(filename) = extract_filename(&path) {
-            let file_path = format!("{}/{}", directory, filename);
-
-            // Read the request body
-            let body_start = request_str.find("\r\n\r\n").unwrap_or(0) + 4;
-            let request_body = &request_str[body_start..];
-
-            if let Err(err) = save_file(&file_path, request_body) {
-                eprintln!("Error saving file: {}", err);
-                // Respond with a 500 Internal Server Error if saving the file fails
-                let response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
-                send_response(stream, response);
-                return;
-            }
-
-            // Respond with a "201 Created" response code
-            let response = "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n";
-            send_response(stream, response);
-        } else {
-            // Respond with a 400 Bad Request for invalid paths
-            let response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
-            send_response(stream, response);
-        }
-    } else if path == "/" {
+    if path == "/" {
         // Respond with a 200 OK for the root path
         let response = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
         send_response(stream, response);
@@ -126,31 +101,52 @@ fn process_request(mut stream: &TcpStream, request_str: &str, headers: &[String]
     } else if let Some(filename) = extract_filename(&path) {
         let file_path = format!("{}/{}", directory, filename);
 
-        if let Ok(mut file) = File::open(&file_path) {
-            let mut file_contents = Vec::new();
-            if let Err(err) = file.read_to_end(&mut file_contents) {
-                eprintln!("Error reading file: {}", err);
-                // Respond with a 500 Internal Server Error if reading the file fails
+        println!("Received {} request", request_str.split(' ').next().unwrap());
+
+        if request_str.starts_with("POST") {
+            // Read the request body
+            let body_start = request_str.find("\r\n\r\n").unwrap_or(0) + 4;
+            let request_body = &request_str[body_start..];
+
+            if let Err(err) = save_file(&file_path, request_body) {
+                eprintln!("Error saving file: {}", err);
+                // Respond with a 500 Internal Server Error if saving the file fails
                 let response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
                 send_response(stream, response);
                 return;
             }
 
-            let content_type = "application/octet-stream";
-            let content_length = file_contents.len();
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n",
-                content_type, content_length
-            );
-
-            send_response(stream, &response);
-            if let Err(err) = stream.write_all(&file_contents) {
-                eprintln!("Error writing file contents: {}", err);
-            }
-        } else {
-            // Respond with a 404 Not Found if the file doesn't exist
-            let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+            // Respond with a "201 Created" response code
+            let response = "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n";
             send_response(stream, response);
+        } else {
+            if let Ok(mut file) = File::open(&file_path) {
+                let mut file_contents = Vec::new();
+                if let Err(err) = file.read_to_end(&mut file_contents) {
+                    eprintln!("Error reading file: {}", err);
+                    // Respond with a 500 Internal Server Error if reading the file fails
+                    let response =
+                        "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
+                    send_response(stream, response);
+                    return;
+                }
+
+                let content_type = "application/octet-stream";
+                let content_length = file_contents.len();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n",
+                    content_type, content_length
+                );
+
+                send_response(stream, &response);
+                if let Err(err) = stream.write_all(&file_contents) {
+                    eprintln!("Error writing file contents: {}", err);
+                }
+            } else {
+                // Respond with a 404 Not Found if the file doesn't exist
+                let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+                send_response(stream, response);
+            }
         }
     } else {
         let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
