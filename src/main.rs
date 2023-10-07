@@ -1,4 +1,4 @@
-use mime_guess::MimeGuess;
+//use mime_guess::MimeGuess;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
