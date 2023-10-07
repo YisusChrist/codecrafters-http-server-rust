@@ -52,51 +52,29 @@ fn handle_client(stream: TcpStream, directory: &str) {
 
 fn read_request(mut stream: &TcpStream) -> io::Result<(String, Vec<String>, String)> {
     let mut request = String::new();
-    let mut headers = Vec::new();
-    let mut buffer = [0; 1024];
-    let mut header_complete = false;
-    let mut content_length = 0;
+    let headers;
 
-    while let Ok(n) = stream.read(&mut buffer) {
-        if n == 0 {
-            break;
-        }
-        request.push_str(&String::from_utf8_lossy(&buffer[..n]));
+    // Read the request into a string
+    stream.read_to_string(&mut request)?;
 
-        if !header_complete {
-            if let Some(end) = request.find("\r\n\r\n") {
-                let header_section = &request[..=end];
-                headers = header_section.lines().map(String::from).collect();
-                header_complete = true;
-
-                if let Some(length_str) = headers.iter().find(|s| s.starts_with("Content-Length: "))
-                {
-                    let parts: Vec<&str> = length_str.splitn(2, ' ').collect();
-                    if parts.len() == 2 {
-                        if let Ok(length) = parts[1].parse::<usize>() {
-                            content_length = length;
-                        }
-                    }
-                }
-            }
-        }
-
-        if header_complete && request.len() >= content_length {
-            break;
-        }
-    }
-
-    if header_complete {
-        let body_start = request.find("\r\n\r\n").unwrap_or(0) + 4;
-        let body = request.split_off(body_start);
-        Ok((request, headers, body))
+    // Split the request into headers and body
+    let (header_section, body) = if let Some(end) = request.find("\r\n\r\n") {
+        let body_start = end + 4;
+        let (header_section, body) = request.split_at(body_start);
+        (header_section, body)
     } else {
-        Err(io::Error::new(
+        return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "Incomplete header",
-        ))
-    }
+        ));
+    };
+
+    // Extract headers
+    headers = header_section.lines().map(String::from).collect();
+
+    Ok((header_section.to_string(), headers, body.to_string()))
 }
+
 
 fn process_request(
     mut stream: &TcpStream,
