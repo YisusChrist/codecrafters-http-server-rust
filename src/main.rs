@@ -69,9 +69,31 @@ fn handle_client(stream: TcpStream, directory: &str) {
     }
 }
 
-fn read_request(mut stream: &TcpStream) -> io::Result<HttpRequest> {
+fn read_request(stream: &TcpStream) -> io::Result<HttpRequest> {
     let mut request = String::new();
     let mut headers = Vec::new();
+
+    // Read request headers and extract content length
+    let content_length = read_headers(&mut request, &mut headers, stream)?;
+
+    // Read request body based on content length
+    let body = read_body(&mut request, content_length, stream)?;
+
+    // Trim the trailing CRLF
+    let request_str = request.trim_end_matches("\r\n\r\n").to_string();
+
+    Ok(HttpRequest {
+        request_str,
+        headers,
+        body,
+    })
+}
+
+fn read_headers(
+    request: &mut String,
+    headers: &mut Vec<String>,
+    mut stream: &TcpStream,
+) -> io::Result<usize> {
     let mut buffer = [0; 1024];
     let mut header_complete = false;
     let mut content_length = 0;
@@ -85,7 +107,7 @@ fn read_request(mut stream: &TcpStream) -> io::Result<HttpRequest> {
         if !header_complete {
             if let Some(end) = request.find("\r\n\r\n") {
                 let header_section = &request[..=end];
-                headers = header_section.lines().map(String::from).collect();
+                headers.extend(header_section.lines().map(String::from));
                 header_complete = true;
 
                 if let Some(length_str) = headers.iter().find(|s| s.starts_with("Content-Length: "))
@@ -101,14 +123,7 @@ fn read_request(mut stream: &TcpStream) -> io::Result<HttpRequest> {
     }
 
     if header_complete {
-        let request_str = request.trim_end_matches("\r\n\r\n").to_string();
-        let body_start = request.find("\r\n\r\n").unwrap_or(0) + 4;
-        let body = request.split_off(body_start);
-        Ok(HttpRequest {
-            request_str,
-            headers,
-            body,
-        })
+        Ok(content_length)
     } else {
         Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -117,14 +132,35 @@ fn read_request(mut stream: &TcpStream) -> io::Result<HttpRequest> {
     }
 }
 
-fn parse_content_length(header: &str) -> usize {
-    let parts: Vec<&str> = header.splitn(2, ' ').collect();
-    if parts.len() == 2 {
-        if let Ok(length) = parts[1].parse::<usize>() {
-            return length;
+fn read_body(
+    request: &mut String,
+    content_length: usize,
+    mut stream: &TcpStream,
+) -> io::Result<String> {
+    let body_start = request.find("\r\n\r\n").unwrap_or(0) + 4;
+    let mut body = request.split_off(body_start);
+
+    // Continue reading from the stream until the entire body is received
+    while body.len() < content_length {
+        let mut buffer = [0; 1024];
+        let n = stream.read(&mut buffer)?;
+
+        if n == 0 {
+            break;
         }
+
+        body.push_str(&String::from_utf8_lossy(&buffer[..n]));
     }
-    0 // Default value if parsing fails
+
+    Ok(body)
+}
+
+fn parse_content_length(length_str: &str) -> usize {
+    length_str
+        .splitn(2, ' ')
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
 }
 
 fn process_request(
