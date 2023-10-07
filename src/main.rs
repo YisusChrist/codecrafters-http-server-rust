@@ -119,25 +119,21 @@ fn process_request(
     body: &str,
     directory: &str,
 ) {
-    match extract_path(request_str) {
-        Some("/") => {
-            let response = HttpResponse {
-                status: "HTTP/1.1 200 OK",
-                content_type: None,
-                content_length: Some(0),
-                body: None,
-            };
-            send_response(stream, &response);
-        }
+    let response: HttpResponse = match extract_path(request_str) {
+        Some("/") => HttpResponse {
+            status: "HTTP/1.1 200 OK",
+            content_type: None,
+            content_length: Some(0),
+            body: None,
+        },
         Some(path) if path.starts_with("/echo/") => {
             let random_string = path.trim_start_matches("/echo/");
-            let response = HttpResponse {
+            HttpResponse {
                 status: "HTTP/1.1 200 OK",
                 content_type: Some("text/plain"),
                 content_length: Some(random_string.len()),
                 body: Some(random_string.to_string()),
-            };
-            send_response(stream, &response);
+            }
         }
         Some("/user-agent") => {
             if let Some(user_agent) = headers
@@ -145,48 +141,51 @@ fn process_request(
                 .find(|header| header.starts_with("User-Agent: "))
             {
                 let user_agent_value = user_agent.replace("User-Agent: ", "");
-                let response = HttpResponse {
+                HttpResponse {
                     status: "HTTP/1.1 200 OK",
                     content_type: Some("text/plain"),
                     content_length: Some(user_agent_value.len()),
                     body: Some(user_agent_value),
-                };
-                send_response(stream, &response);
+                }
+            } else {
+                HttpResponse {
+                    status: "HTTP/1.1 400 Bad Request",
+                    content_type: None,
+                    content_length: Some(0),
+                    body: None,
+                }
             }
         }
         Some(path) => {
             if let Some(filename) = extract_filename(path) {
                 println!("Received filename: {}", filename);
                 let file_path = format!("{}/{}", directory, filename);
-                let response = if request_str.starts_with("POST") {
-                    handle_post_request(&file_path, body)
+                if request_str.starts_with("POST") {
+                    handle_post_file_request(&file_path, body)
                 } else {
-                    handle_get_request(&file_path)
-                };
-                send_response(stream, &response);
+                    handle_get_file_request(&file_path)
+                }
             } else {
-                let response = HttpResponse {
+                HttpResponse {
                     status: "HTTP/1.1 404 Not Found",
                     content_type: None,
                     content_length: Some(0),
                     body: None,
-                };
-                send_response(stream, &response);
+                }
             }
         }
-        None => {
-            let response = HttpResponse {
-                status: "HTTP/1.1 400 Bad Request",
-                content_type: None,
-                content_length: Some(0),
-                body: None,
-            };
-            send_response(stream, &response);
-        }
-    }
+        None => HttpResponse {
+            status: "HTTP/1.1 400 Bad Request",
+            content_type: None,
+            content_length: Some(0),
+            body: None,
+        },
+    };
+
+    send_response(stream, &response);
 }
 
-fn handle_get_request(file_path: &str) -> HttpResponse {
+fn handle_get_file_request(file_path: &str) -> HttpResponse {
     if let Ok(mut file) = File::open(file_path) {
         let mut file_contents = Vec::new();
         if let Err(err) = file.read_to_end(&mut file_contents) {
@@ -218,7 +217,7 @@ fn handle_get_request(file_path: &str) -> HttpResponse {
     }
 }
 
-fn handle_post_request(file_path: &str, body: &str) -> HttpResponse {
+fn handle_post_file_request(file_path: &str, body: &str) -> HttpResponse {
     println!("Received file contents:\n{}", body);
 
     if let Err(err) = save_file(file_path, body) {
