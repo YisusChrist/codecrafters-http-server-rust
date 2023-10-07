@@ -132,6 +132,9 @@ fn process_request(mut stream: &TcpStream, request_str: &str, headers: &[String]
                     let response =
                         "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
                     send_response(stream, response);
+                    if let Err(err) = stream.write_all(&file_contents) {
+                        eprintln!("Error writing file contents: {}", err);
+                    }
                     return;
                 }
 
