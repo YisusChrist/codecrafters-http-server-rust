@@ -8,9 +8,9 @@ fn handle_client(stream: TcpStream, directory: &str) {
     let request = read_request(&stream);
 
     match request {
-        Ok((request_str, headers)) => {
+        Ok((request_str, headers, body)) => {
             println!("Received HTTP request:\n{}", request_str);
-            process_request(&stream, &request_str, &headers, directory);
+            process_request(&stream, &request_str, &headers, &body, directory);
         }
         Err(err) => {
             eprintln!("Error reading request: {}", err);
@@ -22,11 +22,12 @@ fn handle_client(stream: TcpStream, directory: &str) {
     }
 }
 
-fn read_request(mut stream: &TcpStream) -> Result<(String, Vec<String>), std::io::Error> {
+fn read_request(mut stream: &TcpStream) -> Result<(String, Vec<String>, String), std::io::Error> {
     let mut request = String::new();
     let mut headers = Vec::new();
     let mut buffer = [0; 1024];
     let mut header_complete = false;
+    let mut content_length = 0;
 
     while let Ok(n) = stream.read(&mut buffer) {
         if n == 0 {
@@ -39,16 +40,30 @@ fn read_request(mut stream: &TcpStream) -> Result<(String, Vec<String>), std::io
                 let header_section = &request[..=end];
                 headers = header_section.lines().map(|s| s.to_string()).collect();
                 header_complete = true;
+
+                // Check for Content-Length header
+                if let Some(length_str) = headers.iter().find(|s| s.starts_with("Content-Length: "))
+                {
+                    let parts: Vec<&str> = length_str.splitn(2, ' ').collect();
+                    if parts.len() == 2 {
+                        if let Ok(length) = parts[1].parse::<usize>() {
+                            content_length = length;
+                        }
+                    }
+                }
             }
         }
 
-        if request.ends_with("\r\n\r\n") {
+        if header_complete && request.len() >= content_length {
             break;
         }
     }
 
     if header_complete {
-        Ok((request, headers))
+        // Extract the request body if present
+        let body_start = request.find("\r\n\r\n").unwrap_or(0) + 4;
+        let body = request.split_off(body_start);
+        Ok((request, headers, body))
     } else {
         Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -57,7 +72,13 @@ fn read_request(mut stream: &TcpStream) -> Result<(String, Vec<String>), std::io
     }
 }
 
-fn process_request(mut stream: &TcpStream, request_str: &str, headers: &[String], directory: &str) {
+fn process_request(
+    mut stream: &TcpStream,
+    request_str: &str,
+    headers: &[String],
+    body: &str,
+    directory: &str,
+) {
     let path = match extract_path(&request_str) {
         Some(p) => p,
         None => {
@@ -96,33 +117,32 @@ fn process_request(mut stream: &TcpStream, request_str: &str, headers: &[String]
                 user_agent_value
             );
             send_response(stream, &response);
-            return;
         }
     } else if let Some(filename) = extract_filename(&path) {
         let file_path = format!("{}/{}", directory, filename);
 
-        println!("Received {} request", request_str.split(' ').next().unwrap());
+        println!(
+            "Received {} request",
+            request_str.split(' ').next().unwrap()
+        );
 
         if request_str.starts_with("POST") {
-            // Read the request body
-            let body_start = request_str.find("\r\n\r\n").unwrap_or(0) + 4;
-            let request_body = &request_str[body_start..];
+            let response: &str;
 
-            println!("Received file contents:\n{}", request_body);
+            println!("Received file contents:\n{}", body);
 
             // Save the file
-            println!("Saving file {} to: {}", filename, file_path);
-            if let Err(err) = save_file(&file_path, request_body) {
+            println!("Saved file to: {}", file_path);
+            if let Err(err) = save_file(&file_path, body) {
                 eprintln!("Error saving file: {}", err);
                 // Respond with a 500 Internal Server Error if saving the file fails
-                let response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
-                send_response(stream, response);
-                return;
+                response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
+            } else {
+                println!("File saved successfully");
+                // Respond with a "201 Created" response code
+                response = "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n";
             }
-
-            // Respond with a "201 Created" response code
-            let response = "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n";
-            send_response(stream, response);
+            send_response(stream, &response);
         } else {
             if let Ok(mut file) = File::open(&file_path) {
                 let mut file_contents = Vec::new();
@@ -132,9 +152,6 @@ fn process_request(mut stream: &TcpStream, request_str: &str, headers: &[String]
                     let response =
                         "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
                     send_response(stream, response);
-                    if let Err(err) = stream.write_all(&file_contents) {
-                        eprintln!("Error writing file contents: {}", err);
-                    }
                     return;
                 }
 
