@@ -258,7 +258,7 @@ fn handle_get_file_request(file_path: &str) -> HttpResponse {
             };
         }
 
-        let content_type = "text/plain".to_string(); //get_content_type(file_path);
+        let content_type = "application/octet-stream".to_string(); //get_content_type(file_path);
 
         HttpResponse {
             status: "HTTP/1.1 200 OK",
