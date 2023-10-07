@@ -2,35 +2,43 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 
-fn handle_client(mut stream: TcpStream) {
+fn handle_client(stream: TcpStream) {
+    let request = read_request(&stream);
+
+    match request {
+        Ok(request_str) => {
+            println!("Received HTTP request:\n{}", request_str);
+            process_request(&stream, &request_str);
+        }
+        Err(err) => {
+            eprintln!("Error reading request: {}", err);
+        }
+    }
+
+    if let Err(err) = stream.shutdown(std::net::Shutdown::Both) {
+        eprintln!("Error shutting down stream: {}", err);
+    }
+}
+
+fn read_request(mut stream: &TcpStream) -> Result<String, std::io::Error> {
     let mut request = Vec::new();
     let mut buffer = [0; 1024];
-    
-    // Limit the read operation to a reasonable number of bytes
+
     while let Ok(n) = stream.read(&mut buffer) {
         if n == 0 {
             break;
         }
         request.extend_from_slice(&buffer[..n]);
 
-        // Check if we've received a complete HTTP request (ending with \r\n\r\n)
         if request.ends_with(b"\r\n\r\n") {
             break;
         }
     }
 
-    // Convert the request bytes to a string for processing
-    let request_str = match String::from_utf8(request) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Error parsing request: {}", e);
-            return;
-        }
-    };
+    String::from_utf8(request).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
 
-    println!("Received HTTP request:\n{}", request_str);
-
-    // Extract the path from the request
+fn process_request(stream: &TcpStream, request_str: &str) {
     let path = match extract_path(&request_str) {
         Some(p) => p,
         None => {
@@ -39,23 +47,28 @@ fn handle_client(mut stream: TcpStream) {
         }
     };
 
-    // Define the HTTP response based on the path
-    let response = if path == "/" {
-        "HTTP/1.1 200 OK\r\n\r\n"
-    } else {
-        "HTTP/1.1 404 Not Found\r\n\r\n"
-    };
+    println!("Extracted path: {:?}", path);
 
-    // Write the response to the TCP stream
+    if let Some(random_string) = extract_random_string(&path) {
+        println!("Extracted random string: {:?}", random_string);
+
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+            random_string.len(),
+            random_string
+        );
+        send_response(stream, &response);
+    } else {
+        let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+        send_response(stream, response);
+    }
+}
+
+fn send_response(mut stream: &TcpStream, response: &str) {
     if let Err(err) = stream.write_all(response.as_bytes()) {
         eprintln!("Error writing response: {}", err);
     } else {
         println!("Sent response:\n{}", response);
-    }
-
-    // Close the TCP stream to signal the end of the response
-    if let Err(err) = stream.shutdown(std::net::Shutdown::Both) {
-        eprintln!("Error shutting down stream: {}", err);
     }
 }
 
@@ -63,6 +76,15 @@ fn extract_path(request: &str) -> Option<&str> {
     let start = request.find(' ')? + 1;
     let end = request[start..].find(' ')? + start;
     Some(&request[start..end])
+}
+
+fn extract_random_string(path: &str) -> Option<&str> {
+    let parts: Vec<&str> = path.split('/').collect();
+    if parts.len() == 3 && parts[1] == "echo" {
+        Some(parts[2])
+    } else {
+        None
+    }
 }
 
 fn main() {
@@ -75,7 +97,6 @@ fn main() {
             Ok(tcp_stream) => {
                 println!("Accepted new connection");
 
-                // Spawn a new thread to handle the client
                 thread::spawn(move || {
                     handle_client(tcp_stream);
                 });
