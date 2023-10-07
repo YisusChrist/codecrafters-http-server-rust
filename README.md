@@ -212,3 +212,10 @@ Just like in the previous stage, the tester will execute your program with a `--
 It'll then send you a request of the form `POST /files/<filename>`. The request body will contain the contents of the file.
 
 You'll need to fetch the contents of the file from the request body and save it to `<directory>/<filename>`. The response code returned should be `201 Created`.
+
+
+# Extra functionalities added
+
+- Added mime types autodection for files.
+- 
+

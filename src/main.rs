@@ -5,6 +5,12 @@ use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::thread;
 
+const MAX_BODY_LENGTH: usize = 1024;
+const MAX_REQUEST_LENGTH: usize = 1024;
+const SERVER_DIRECTORY: &str = "/path/to/server/directory";
+const SERVER_PORT: &str = "4221";
+const SERVER_ADDRESS: &str = "127.0.0.1";
+
 struct HttpRequest {
     request_str: String,
     headers: Vec<String>,
@@ -24,12 +30,13 @@ fn main() -> io::Result<()> {
         &args[2]
     } else {
         // Default directory when --directory is not provided
-        "/path/to/default/directory"
+        SERVER_DIRECTORY
     };
 
     println!("Logs from your program will appear here!");
 
-    let listener = TcpListener::bind("127.0.0.1:4221")?;
+    let listener = TcpListener::bind(format!("{}:{}", SERVER_ADDRESS, SERVER_PORT))?;
+    println!("Server listening at {}", listener.local_addr()?);
     for stream in listener.incoming() {
         match stream {
             Ok(tcp_stream) => {
@@ -96,7 +103,7 @@ fn read_headers(
     headers: &mut Vec<String>,
     mut stream: &TcpStream,
 ) -> io::Result<usize> {
-    let mut buffer = [0; 1024];
+    let mut buffer = [0; MAX_REQUEST_LENGTH];
     let mut header_complete = false;
     let mut content_length = 0;
 
@@ -144,7 +151,7 @@ fn read_body(
 
     // Continue reading from the stream until the entire body is received
     while body.len() < content_length {
-        let mut buffer = [0; 1024];
+        let mut buffer = [0; MAX_REQUEST_LENGTH];
         let n = stream.read(&mut buffer)?;
 
         if n == 0 {
@@ -180,12 +187,12 @@ fn process_request(
             body: None,
         },
         Some(path) if path.starts_with("/echo/") => {
-            let random_string = path.trim_start_matches("/echo/");
+            let message = path.trim_start_matches("/echo/");
             HttpResponse {
                 status: "HTTP/1.1 200 OK",
                 content_type: Some("text/plain".to_string()),
-                content_length: Some(random_string.len()),
-                body: None,
+                content_length: Some(message.len()),
+                body: Some(message.as_bytes().to_vec()),
             }
         }
         Some("/user-agent") => {
@@ -251,7 +258,7 @@ fn handle_get_file_request(file_path: &str) -> HttpResponse {
             };
         }
 
-        let content_type = get_content_type(file_path);
+        let content_type = "text/plain".to_string(); //get_content_type(file_path);
 
         HttpResponse {
             status: "HTTP/1.1 200 OK",
@@ -306,18 +313,24 @@ fn send_response(mut stream: &TcpStream, response: &HttpResponse) {
 
     response_str += "\r\n\r\n";
 
+    // Write the response string to the stream
     if let Err(err) = stream.write_all(response_str.as_bytes()) {
         eprintln!("Error writing response: {}", err);
     }
 
+    let mut full_response = response_str.clone();
+    // Check if the response has a body
     if let Some(body) = &response.body {
         // Write the binary body data to the stream
         if let Err(err) = stream.write_all(body) {
             eprintln!("Error writing response body: {}", err);
         }
+        // Append the body to the full response string (only MAX_BODY_LENGTH chars at max)
+        let body_str = String::from_utf8_lossy(body);
+        full_response += &body_str[..std::cmp::min(body_str.len(), MAX_BODY_LENGTH)];
     }
 
-    println!("Sent response:\n{}", response_str);
+    println!("Sent response:\n{}", full_response);
 }
 
 fn extract_path(request: &str) -> Option<&str> {
