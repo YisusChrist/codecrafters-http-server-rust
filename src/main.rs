@@ -6,9 +6,9 @@ fn handle_client(stream: TcpStream) {
     let request = read_request(&stream);
 
     match request {
-        Ok(request_str) => {
+        Ok((request_str, headers)) => {
             println!("Received HTTP request:\n{}", request_str);
-            process_request(&stream, &request_str);
+            process_request(&stream, &request_str, &headers);
         }
         Err(err) => {
             eprintln!("Error reading request: {}", err);
@@ -20,25 +20,42 @@ fn handle_client(stream: TcpStream) {
     }
 }
 
-fn read_request(mut stream: &TcpStream) -> Result<String, std::io::Error> {
-    let mut request = Vec::new();
+fn read_request(mut stream: &TcpStream) -> Result<(String, Vec<String>), std::io::Error> {
+    let mut request = String::new();
+    let mut headers = Vec::new();
     let mut buffer = [0; 1024];
+    let mut header_complete = false;
 
     while let Ok(n) = stream.read(&mut buffer) {
         if n == 0 {
             break;
         }
-        request.extend_from_slice(&buffer[..n]);
+        request.push_str(&String::from_utf8_lossy(&buffer[..n]));
 
-        if request.ends_with(b"\r\n\r\n") {
+        if !header_complete {
+            if let Some(end) = request.find("\r\n\r\n") {
+                let header_section = &request[..=end];
+                headers = header_section.lines().map(|s| s.to_string()).collect();
+                header_complete = true;
+            }
+        }
+
+        if request.ends_with("\r\n\r\n") {
             break;
         }
     }
 
-    String::from_utf8(request).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    if header_complete {
+        Ok((request, headers))
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Incomplete header",
+        ))
+    }
 }
 
-fn process_request(stream: &TcpStream, request_str: &str) {
+fn process_request(stream: &TcpStream, request_str: &str, headers: &[String]) {
     let path = match extract_path(&request_str) {
         Some(p) => p,
         None => {
@@ -62,6 +79,23 @@ fn process_request(stream: &TcpStream, request_str: &str) {
             random_string
         );
         send_response(stream, &response);
+    } else if path == "/user-agent" {
+        // Find the User-Agent header value
+        let user_agent = headers
+            .iter()
+            .find(|header| header.starts_with("User-Agent: "));
+        if let Some(user_agent) = user_agent {
+            let user_agent_value = user_agent.replace("User-Agent: ", "");
+            println!("User-Agent: {:?}", user_agent_value);
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                user_agent_value.len(),
+                user_agent_value
+            );
+            send_response(stream, &response);
+            return;
+        }
     } else {
         let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
         send_response(stream, response);
